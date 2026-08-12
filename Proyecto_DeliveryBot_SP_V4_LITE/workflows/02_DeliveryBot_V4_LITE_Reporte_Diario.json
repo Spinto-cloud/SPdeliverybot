@@ -1,0 +1,132 @@
+{
+  "name": "DeliveryBot V4 LITE - Reporte Diario",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-lite",
+      "name": "Reporte Diario 20h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PEDIDOS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-orders-report-lite",
+      "name": "Leer PEDIDOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -280,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows=$input.all().map(i=>i.json).filter(x=>x.id_pedido);\nconst today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'});\nconst todays=rows.filter(r=>String(r.fecha)===today && String(r.estado)!=='Cancelado');\nconst total=todays.reduce((s,r)=>s+Number(r.total_pago||0),0);\nconst products={}; const hours={};\nfor(const r of todays){\n  let detail=[]; try{detail=JSON.parse(r.detalles_pedido||'[]')}catch{}\n  for(const p of detail) products[p.nombre]=(products[p.nombre]||0)+Number(p.cantidad||0);\n  const h=String(r.hora||'00').slice(0,2);\n  hours[h]=(hours[h]||0)+1;\n}\nconst star=Object.entries(products).sort((a,b)=>b[1]-a[1])[0]||['Sin ventas',0];\nconst peak=Object.entries(hours).sort((a,b)=>b[1]-a[1])[0]||['--',0];\nconst peakText=peak[0]==='--'?'Sin pedidos':`${peak[0]}:00-${String(Number(peak[0])+1).padStart(2,'0')}:00`;\nconst money=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(Number(n||0));\nreturn [{json:{text:`📊 *REPORTE DIARIO DELIVERYBOT*\\n\\nFecha: ${today}\\n💰 Total vendido: *${money(total)}*\\n🧾 Número de pedidos: *${todays.length}*\\n🎫 Ticket promedio: *${money(todays.length?total/todays.length:0)}*\\n⭐ Producto más vendido: *${star[0]}* (${star[1]} uds.)\\n🕒 Hora pico: *${peakText}*`}}];"
+      },
+      "id": "report-code-lite",
+      "name": "Calcular Reporte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REEMPLAZAR_CHAT_ADMIN_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "send-report-lite",
+      "name": "Enviar Reporte Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Reporte Diario 20h": {
+      "main": [
+        [
+          {
+            "node": "Leer PEDIDOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PEDIDOS": {
+      "main": [
+        [
+          {
+            "node": "Calcular Reporte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Reporte": {
+      "main": [
+        [
+          {
+            "node": "Enviar Reporte Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Bogota"
+  },
+  "active": false,
+  "versionId": "deliverybot-v4-lite-report",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "deliveryBotVersion": "4.0-LITE"
+  },
+  "tags": [
+    {
+      "name": "DeliveryBot Lite"
+    }
+  ]
+}

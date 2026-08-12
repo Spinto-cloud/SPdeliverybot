@@ -1,0 +1,671 @@
+{
+  "name": "DeliveryBot V4 LITE - Pedidos y Estados",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "tg-trigger-lite",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.message || {};\nconst from = msg.from || {};\nconst text = String(msg.text || '').trim();\n\nreturn [{\n  json: {\n    telegram_id: String(from.id || ''),\n    chat_id: String(msg.chat?.id || from.id || ''),\n    nombre: [from.first_name, from.last_name].filter(Boolean).join(' '),\n    texto: text\n  }\n}];"
+      },
+      "id": "normalize-lite",
+      "name": "Normalizar Evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "MENU",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-menu-lite",
+      "name": "Leer MENU",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -840,
+        -300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "USUARIOS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-users-lite",
+      "name": "Leer USUARIOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -840,
+        -100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "SESSIONS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-sessions-lite",
+      "name": "Leer SESSIONS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -840,
+        100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PEDIDOS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-orders-lite",
+      "name": "Leer PEDIDOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -840,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "merge-lite",
+      "name": "Sincronizar Datos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -580,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const evt = $('Normalizar Evento').first().json;\n\nconst menu = $('Leer MENU').all().map(i=>i.json).filter(x=>x.id_producto);\nconst users = $('Leer USUARIOS').all().map(i=>i.json).filter(x=>x.telegram_id);\nconst sessions = $('Leer SESSIONS').all().map(i=>i.json).filter(x=>x.telegram_id);\nconst orders = $('Leer PEDIDOS').all().map(i=>i.json).filter(x=>x.id_pedido);\n\nconst existingUser = users.find(u=>String(u.telegram_id)===String(evt.telegram_id));\nconst existingSession = sessions.find(s=>String(s.telegram_id)===String(evt.telegram_id));\n\nlet cart=[];\ntry { cart=JSON.parse(existingSession?.carrito_temporal || '[]'); } catch { cart=[]; }\n\nconst money=n=>new Intl.NumberFormat('es-CO',{\n  style:'currency',currency:'COP',maximumFractionDigits:0\n}).format(Number(n||0));\n\nconst cartTotal=()=>cart.reduce(\n  (sum,item)=>sum+Number(item.precio)*Number(item.cantidad),0\n);\n\nconst menuText=()=>{\n  const categories=['Bebidas','Comidas','Snacks'];\n  let txt='📋 *MENÚ DELIVERYBOT*\\n';\n  for(const cat of categories){\n    const items=menu.filter(p=>String(p.categoria)===cat && Number(p.stock)>0);\n    if(!items.length) continue;\n    txt+=`\\n*${cat.toUpperCase()}*\\n`;\n    for(const p of items){\n      txt+=`${p.id_producto} · ${p.nombre} · ${money(p.precio)} · Stock ${p.stock}\\n`;\n    }\n  }\n  txt+='\\nPara agregar escribe:\\n`AGREGAR BEB001 2`\\n\\nComandos: /carrito · /confirmar · /estado · /historial';\n  return txt;\n};\n\nconst raw=String(evt.texto||'').trim();\nconst upper=raw.toUpperCase();\n\nlet response={\n  chat_id:evt.chat_id,\n  text:'',\n  order:null,\n  stock_updates:[],\n  state_update:null,\n  kitchen_text:'',\n  user_record:{\n    telegram_id:evt.telegram_id,\n    nombre_completo:evt.nombre || existingUser?.nombre_completo || 'Usuario Telegram',\n    departamento_oficina:existingUser?.departamento_oficina || 'POR DEFINIR',\n    puntos_lealtad:Number(existingUser?.puntos_lealtad || 0)\n  },\n  session_record:{\n    telegram_id:evt.telegram_id,\n    pantalla_actual:'COMANDOS',\n    carrito_temporal:'[]',\n    ultimo_cambio:new Date().toISOString()\n  }\n};\n\nif(['/START','/MENU','MENU','HOLA','BUENAS','BUENOS DÍAS','BUENOS DIAS'].includes(upper)){\n  response.text=`☕ *DeliveryBot Cafetería*\\n\\nHola ${evt.nombre||'👋'}.\\nPuedes pedir usando comandos sencillos.\\n\\n${menuText()}`;\n\n}else if(/^(?:AGREGAR\\s+)?[A-Z]{3}\\d{3}\\s+\\d+$/.test(upper)){\n  const parts=upper.replace(/^AGREGAR\\s+/,'').split(/\\s+/);\n  const id=parts[0];\n  const qty=Number(parts[1]);\n  const p=menu.find(x=>String(x.id_producto).toUpperCase()===id);\n\n  if(!p){\n    response.text=`❌ No encontré el producto ${id}. Envía /menu para ver los códigos.`;\n  }else if(qty<1 || qty>10){\n    response.text='⚠️ La cantidad debe estar entre 1 y 10.';\n  }else{\n    const inCart=cart.find(x=>x.id===id);\n    const currentQty=Number(inCart?.cantidad||0);\n\n    if(currentQty+qty>Number(p.stock)){\n      response.text=`⚠️ Stock insuficiente de ${p.nombre}. Disponible: ${p.stock}.`;\n    }else{\n      if(inCart) inCart.cantidad=currentQty+qty;\n      else cart.push({id,nombre:p.nombre,cantidad:qty,precio:Number(p.precio)});\n\n      response.text=`✅ Agregado: ${qty} × *${p.nombre}*\\nSubtotal: *${money(cartTotal())}*\\n\\nEnvía /carrito para revisar o /menu para seguir comprando.`;\n    }\n  }\n\n}else if(upper==='/CARRITO' || upper==='CARRITO'){\n  if(!cart.length){\n    response.text='🛒 Tu carrito está vacío. Envía /menu para comenzar.';\n  }else{\n    const lines=cart.map(x=>`• ${x.cantidad} × ${x.nombre} = ${money(Number(x.cantidad)*Number(x.precio))}`).join('\\n');\n    response.text=`🛒 *TU CARRITO*\\n\\n${lines}\\n\\n*TOTAL: ${money(cartTotal())}*\\n\\nEnvía /confirmar para crear el pedido o /vaciar para empezar de nuevo.`;\n  }\n\n}else if(upper==='/VACIAR' || upper==='VACIAR'){\n  cart=[];\n  response.text='🗑️ Carrito vaciado. Envía /menu para hacer un nuevo pedido.';\n\n}else if(upper==='/CONFIRMAR' || upper==='CONFIRMAR'){\n  if(!cart.length){\n    response.text='⚠️ No puedes confirmar porque el carrito está vacío.';\n  }else{\n    const faltantes=[];\n    for(const x of cart){\n      const p=menu.find(m=>String(m.id_producto)===String(x.id));\n      if(!p || Number(p.stock)<Number(x.cantidad)) faltantes.push(x.nombre);\n    }\n\n    if(faltantes.length){\n      response.text=`⚠️ El stock cambió para: ${faltantes.join(', ')}.\\nEnvía /menu y ajusta el pedido.`;\n    }else{\n      const now=new Date();\n      const date=now.toLocaleDateString('en-CA',{timeZone:'America/Bogota'});\n      const time=now.toLocaleTimeString('es-CO',{\n        timeZone:'America/Bogota',hour:'2-digit',minute:'2-digit',hour12:false\n      });\n      const idPedido=`DB-${date.replaceAll('-','')}-${String(now.getTime()).slice(-6)}`;\n      const total=cartTotal();\n\n      response.order={\n        id_pedido:idPedido,\n        id_usuario:evt.telegram_id,\n        detalles_pedido:JSON.stringify(cart),\n        total_pago:total,\n        estado:'Recibido',\n        fecha:date,\n        hora:time\n      };\n\n      response.stock_updates=cart.map(x=>{\n        const p=menu.find(m=>String(m.id_producto)===String(x.id));\n        return {id_producto:x.id,stock:Number(p.stock)-Number(x.cantidad)};\n      });\n\n      const kitchenLines=cart.map(x=>`${x.cantidad} × ${x.nombre}`).join('\\n');\n\n      response.kitchen_text=`🔔 *NUEVO PEDIDO*\\n\\nPedido: *${idPedido}*\\n${kitchenLines}\\n\\nTotal: *${money(total)}*\\n\\nPara actualizar estado:\\nESTADO ${idPedido} PREPARACION`;\n\n      response.text=`✅ *PEDIDO CONFIRMADO*\\n\\nNúmero: *${idPedido}*\\nTotal: *${money(total)}*\\nEstado: *Recibido*\\n\\nEnvía /estado para consultar el avance.`;\n\n      response.user_record.puntos_lealtad=\n        Number(response.user_record.puntos_lealtad)+Math.floor(total/1000);\n\n      cart=[];\n    }\n  }\n\n}else if(/^ESTADO\\s+DB-\\S+\\s+.+$/i.test(raw)){\n  const match=raw.match(/^ESTADO\\s+(DB-\\S+)\\s+(.+)$/i);\n  const idPedido=match[1];\n  const requested=match[2]\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n    .replaceAll('_',' ').trim().toUpperCase();\n\n  const states={\n    'RECIBIDO':'Recibido',\n    'PREPARACION':'Preparación',\n    'EN CAMINO':'En camino',\n    'ENTREGADO':'Entregado',\n    'CANCELADO':'Cancelado'\n  };\n\n  const newState=states[requested];\n  const order=orders.find(o=>String(o.id_pedido)===idPedido);\n\n  if(!order){\n    response.text=`❌ No encontré el pedido ${idPedido}.`;\n  }else if(!newState){\n    response.text='⚠️ Estado inválido. Usa PREPARACION, EN_CAMINO, ENTREGADO o CANCELADO.';\n  }else{\n    response.state_update={\n      id_pedido:idPedido,\n      estado:newState,\n      id_usuario:String(order.id_usuario),\n      user_text:`📦 *Actualización de pedido*\\n\\nPedido: *${idPedido}*\\nNuevo estado: *${newState}*`\n    };\n    response.text=`✅ ${idPedido} actualizado a *${newState}*.`;\n  }\n\n}else if(upper==='/ESTADO' || upper==='ESTADO'){\n  const myOrders=orders.filter(o=>String(o.id_usuario)===String(evt.telegram_id));\n  const last=myOrders.length ? myOrders[myOrders.length-1] : null;\n\n  if(!last){\n    response.text='📦 Todavía no tienes pedidos registrados.';\n  }else{\n    response.text=`📦 *ESTADO DE TU PEDIDO*\\n\\nPedido: *${last.id_pedido}*\\nEstado: *${last.estado}*\\nTotal: *${money(last.total_pago)}*\\nFecha: ${last.fecha} ${last.hora}`;\n  }\n\n}else if(upper==='/HISTORIAL' || upper==='HISTORIAL'){\n  const myOrders=orders\n    .filter(o=>String(o.id_usuario)===String(evt.telegram_id))\n    .slice(-5).reverse();\n\n  if(!myOrders.length){\n    response.text='📜 No tienes pedidos anteriores.';\n  }else{\n    response.text='📜 *ÚLTIMOS PEDIDOS*\\n\\n'+myOrders.map(\n      o=>`• ${o.id_pedido} · ${o.estado} · ${money(o.total_pago)} · ${o.fecha}`\n    ).join('\\n');\n  }\n\n}else{\n  response.text='No entendí el comando.\\n\\nUsa:\\n/menu\\nAGREGAR BEB001 2\\n/carrito\\n/confirmar\\n/vaciar\\n/estado\\n/historial';\n}\n\nresponse.session_record.carrito_temporal=JSON.stringify(cart);\nresponse.session_record.ultimo_cambio=new Date().toISOString();\n\nreturn [{json:response}];"
+      },
+      "id": "motor-lite",
+      "name": "Motor DeliveryBot Lite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "USUARIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "telegram_id"
+          ],
+          "value": {
+            "telegram_id": "={{ $('Motor DeliveryBot Lite').first().json.user_record.telegram_id }}",
+            "nombre_completo": "={{ $('Motor DeliveryBot Lite').first().json.user_record.nombre_completo }}",
+            "departamento_oficina": "={{ $('Motor DeliveryBot Lite').first().json.user_record.departamento_oficina }}",
+            "puntos_lealtad": "={{ $('Motor DeliveryBot Lite').first().json.user_record.puntos_lealtad }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-user-lite",
+      "name": "Guardar Usuario",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -40,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "SESSIONS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "telegram_id"
+          ],
+          "value": {
+            "telegram_id": "={{ $('Motor DeliveryBot Lite').first().json.session_record.telegram_id }}",
+            "pantalla_actual": "={{ $('Motor DeliveryBot Lite').first().json.session_record.pantalla_actual }}",
+            "carrito_temporal": "={{ $('Motor DeliveryBot Lite').first().json.session_record.carrito_temporal }}",
+            "ultimo_cambio": "={{ $('Motor DeliveryBot Lite').first().json.session_record.ultimo_cambio }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-session-lite",
+      "name": "Guardar Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -40,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$('Motor DeliveryBot Lite').first().json.order }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-order-lite",
+      "name": "¿Confirmó Pedido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -40,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PEDIDOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_pedido": "={{ $('Motor DeliveryBot Lite').first().json.order.id_pedido }}",
+            "id_usuario": "={{ $('Motor DeliveryBot Lite').first().json.order.id_usuario }}",
+            "detalles_pedido": "={{ $('Motor DeliveryBot Lite').first().json.order.detalles_pedido }}",
+            "total_pago": "={{ $('Motor DeliveryBot Lite').first().json.order.total_pago }}",
+            "estado": "={{ $('Motor DeliveryBot Lite').first().json.order.estado }}",
+            "fecha": "={{ $('Motor DeliveryBot Lite').first().json.order.fecha }}",
+            "hora": "={{ $('Motor DeliveryBot Lite').first().json.order.hora }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-order-lite",
+      "name": "Guardar Pedido",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const u=$('Motor DeliveryBot Lite').first().json.stock_updates || []; return u.map(x=>({json:x}));"
+      },
+      "id": "prepare-stock-lite",
+      "name": "Preparar Stock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "MENU",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id_producto"
+          ],
+          "value": {
+            "id_producto": "={{ $json.id_producto }}",
+            "stock": "={{ $json.stock }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update-stock-lite",
+      "name": "Actualizar Stock",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        480,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REEMPLAZAR_CHAT_COCINA_ID",
+        "text": "={{ $('Motor DeliveryBot Lite').first().json.kitchen_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "notify-kitchen-lite",
+      "name": "Avisar Cocina",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$('Motor DeliveryBot Lite').first().json.state_update }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-state-lite",
+      "name": "¿Cambio de Estado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -40,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PEDIDOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id_pedido"
+          ],
+          "value": {
+            "id_pedido": "={{ $('Motor DeliveryBot Lite').first().json.state_update.id_pedido }}",
+            "estado": "={{ $('Motor DeliveryBot Lite').first().json.state_update.estado }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update-state-lite",
+      "name": "Actualizar Estado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Motor DeliveryBot Lite').first().json.state_update.id_usuario }}",
+        "text": "={{ $('Motor DeliveryBot Lite').first().json.state_update.user_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "notify-state-lite",
+      "name": "Notificar Estado Usuario",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Motor DeliveryBot Lite').first().json.chat_id }}",
+        "text": "={{ $('Motor DeliveryBot Lite').first().json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-lite",
+      "name": "Responder Usuario",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -40,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Evento": {
+      "main": [
+        [
+          {
+            "node": "Leer MENU",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer USUARIOS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer SESSIONS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer PEDIDOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer MENU": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer USUARIOS": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar Datos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Leer SESSIONS": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar Datos",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Leer PEDIDOS": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar Datos",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Sincronizar Datos": {
+      "main": [
+        [
+          {
+            "node": "Motor DeliveryBot Lite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motor DeliveryBot Lite": {
+      "main": [
+        [
+          {
+            "node": "Guardar Usuario",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Guardar Session",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Confirmó Pedido?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Cambio de Estado?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Responder Usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Confirmó Pedido?": {
+      "main": [
+        [
+          {
+            "node": "Guardar Pedido",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Preparar Stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Guardar Pedido": {
+      "main": [
+        [
+          {
+            "node": "Avisar Cocina",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Stock": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Stock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Cambio de Estado?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Actualizar Estado": {
+      "main": [
+        [
+          {
+            "node": "Notificar Estado Usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Bogota"
+  },
+  "active": false,
+  "versionId": "deliverybot-v4-lite-main",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "deliveryBotVersion": "4.0-LITE"
+  },
+  "tags": [
+    {
+      "name": "DeliveryBot Lite"
+    }
+  ]
+}

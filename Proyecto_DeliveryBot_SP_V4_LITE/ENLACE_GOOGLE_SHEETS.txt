@@ -1,0 +1,5 @@
+ENLACE GOOGLE SHEETS DEL PROYECTO
+
+PEGAR_AQUI_URL_PUBLICA_GOOGLE_SHEETS
+
+Permiso recomendado: Cualquier persona con el enlace -> Lector
