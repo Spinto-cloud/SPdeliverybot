@@ -21,6 +21,11 @@ flowchart LR
     K --> RP[(Google Sheets REPORTES)]
 ```
 
+<img width="1855" height="757" alt="image" src="https://github.com/user-attachments/assets/ba24bd02-459e-45eb-b9a9-e636fdb52e98" />
+
+<img width="1352" height="889" alt="image" src="https://github.com/user-attachments/assets/bcc2da7d-ced9-4a17-b8ac-5d237b59c22f" />
+
+
 ## Módulos
 
 1. **Pedidos Telegram**
